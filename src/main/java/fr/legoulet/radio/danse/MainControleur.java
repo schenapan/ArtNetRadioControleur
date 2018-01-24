@@ -1,5 +1,7 @@
 package fr.legoulet.radio.danse;
 
+import java.net.SocketException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -7,6 +9,8 @@ import com.zsmartsystems.zigbee.dongle.ember.EzspFrameHandler;
 import com.zsmartsystems.zigbee.dongle.ember.ZigBeeDongleEzsp;
 import com.zsmartsystems.zigbee.dongle.ember.ezsp.EzspFrame;
 import com.zsmartsystems.zigbee.dongle.ember.ezsp.command.EzspMfgLibRxHandler;
+import com.zsmartsystems.zigbee.dongle.ember.ezsp.command.EzspMfgLibSendPacketRequest;
+import com.zsmartsystems.zigbee.dongle.ember.ezsp.command.EzspMfgLibSendPacketResponse;
 import com.zsmartsystems.zigbee.dongle.ember.ezsp.command.EzspMfgLibSetChannelRequest;
 import com.zsmartsystems.zigbee.dongle.ember.ezsp.command.EzspMfgLibSetChannelResponse;
 import com.zsmartsystems.zigbee.dongle.ember.ezsp.command.EzspMfgLibStartRequest;
@@ -21,6 +25,7 @@ import artnet4j.ArtNetException;
 import artnet4j.ArtNetServer;
 import artnet4j.NodeReportCode;
 import artnet4j.events.ArtNetServerListener;
+import artnet4j.packets.ArtDmxPacket;
 import artnet4j.packets.ArtNetPacket;
 import artnet4j.packets.PacketType;
 
@@ -30,6 +35,9 @@ public class MainControleur {
      */
     private final static Logger logger = LoggerFactory.getLogger(MainControleur.class);   
 
+    private static ZigBeeDongleEzsp dongle;
+    private static ArtNet artnet;
+    
     private static boolean captureEnable = false;
     private static EzspFrameHandler ezspListener = new EzspFrameHandler() {
 
@@ -57,7 +65,11 @@ public class MainControleur {
     	/* Run cleanUp on all interaces when exiting */
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
         	// TODO effectuer le nettoyage avant de quitter
-        	captureEnable = false;
+        	logger.info("Close dongle");
+        	dongle.shutdown();
+        	
+        	logger.info("stopping artnet");
+        	artnet.stop();
         }));
 
 
@@ -70,11 +82,11 @@ public class MainControleur {
         final ZigBeePort serialPort = new ZigBeeSerialPort(serialPortName, serialBaud, flowControl);
 
         logger.info("Create ezsp dongle");
-        final ZigBeeDongleEzsp dongle = new ZigBeeDongleEzsp(serialPort);
+        dongle = new ZigBeeDongleEzsp(serialPort);
 
         logger.info("ASH Init");
         if( dongle.initializeEzspProtocol() ) {
-        	// add listener for receive alla ezsp response and handler
+        	// add listener for receive all ezsp response and handler
         	dongle.addListener( ezspListener );
         	
         	// start MfgLib
@@ -84,18 +96,43 @@ public class MainControleur {
         	if(EmberStatus.EMBER_SUCCESS == mfgStartRsp.getStatus()) {
             	// set channel
         		EzspMfgLibSetChannelRequest mfgSetChannelRqst = new EzspMfgLibSetChannelRequest();
-        		mfgSetChannelRqst.setChannel(11);
+        		mfgSetChannelRqst.setChannel(15);
         		EzspMfgLibSetChannelResponse mfgSetChannelRsp = (EzspMfgLibSetChannelResponse) dongle.singleCall(mfgSetChannelRqst, EzspMfgLibSetChannelResponse.class);
         		
         		if(EmberStatus.EMBER_SUCCESS == mfgSetChannelRsp.getStatus() ) {
         			/** @todo ??? */
+        			startArtNetDevice();
+        			
+        			while(true)
+        				;
+        			
         		}
         	}
         }        
         
-        logger.info("starting artnet");
         /*
-        ArtNet artnet = new ArtNet();
+        try {
+			Thread.sleep(30000);
+		} catch (InterruptedException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+        
+        
+    	logger.info("Close dongle");
+    	dongle.shutdown();
+    	
+    	logger.info("stopping artnet");
+    	//artnet.stop();
+        
+        
+        logger.error("Controleur STOP !");
+        */
+	}
+	
+	private static void startArtNetDevice() {
+        logger.info("starting artnet");
+        artnet = new ArtNet();
         try {
 			artnet.start();
 			artnet.addServerListener(new ArtNetServerListener() {
@@ -121,24 +158,104 @@ public class MainControleur {
 				@Override
 				public void artNetPacketReceived(ArtNetPacket packet) {
 					// TODO Auto-generated method stub
-					logger.info("artnet server packet received : {}", packet);
+					// logger.info("artnet server packet received : {}", packet);
 					if( PacketType.ART_POLL == packet.getType() ) {
 						artnet4j.packets.ArtPollReplyPacket out = new artnet4j.packets.ArtPollReplyPacket();
 						out.setReportCode(NodeReportCode.RcPowerOk);
-						out.setData(new byte[] { 0,0,0,0, 0x36,0x19, 0,0, 0,0, (byte)0xFF, (byte)0xFF, 0, 
-								(byte)0xff,(byte)0xff, 0, 0, 0, 1,0, (byte)0x80,0,0,0, 0,0,0,0, 0,0,0,0, 
-								0,0,0,0, 0,0,0,0, 0, 0});
 						
+						byte[] pollReply = {0x41, 0x72, 0x74, 0x2d, 0x4e, 0x65, 0x74, 0x00, // ID: Art-Net
+									0x00, 0x21, // OpCode : ART_POLL_REPLY
+									(byte) 192, (byte) 168, 1, 84, // IpAddress
+									0x36, 0x19, // PortNumber  
+									0, 1, // VersInfo
+									0, // NetSwitch 
+									1, // SubSwitch  
+									(byte) 0xff, (byte) 0xff, // Oem
+									0, // UbeaVersion
+									0, // Status1
+									0, 0, // EstaMan
+									'a', 'r', 't', 'N', 'e', 't', 'R', 'a', 'd', 'i', 'o', 0, 0, 0, 0, 0, 0, 0, // ShortName
+									'l', 'e', ' ', 'G', 'o', 'u', 'l', 'e', 't', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LongName
+									0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+									0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+									0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+									0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // NodeReport
+									0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+									0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+									0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+									0x00, 0x01, // NumPorts
+									(byte) 0x80, 0x00, 0x00, 0x00, // PortTypes [4]
+									(byte) 0x80, 0x00, 0x00, 0x00, // GoodInput [4]
+									(byte) 0x00, 0x00, 0x00, 0x00, // GoodOutput [4]
+									0x00, 0x00, 0x00, 0x00, // SwIn[4] 
+									0x00, 0x00, 0x00, 0x00, // SwOut[4]
+									0x00, // SwVideo
+									0x00, // SwMacro 
+									0x00, // SwRemote
+									0x00, // Spare1
+									0x00, // Spare2
+									0x00, // Spare3
+									0x00, // Style
+									0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Mac
+									(byte) 192, (byte) 168, 1, 84, // BindIp
+									1, // BindIndex
+									0, // Status2
+									0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // Filler
+									0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+									0, 0, 0, 0, 0, 0
+						};
 						
-						
+						out.setData(pollReply);
+
+						artnet.setBroadCastAddress("192.168.1.255");
 						artnet.broadcastPacket(out);
+					}
+					else if( PacketType.ART_OUTPUT == packet.getType() ) {
+						ArtDmxPacket data = (ArtDmxPacket) packet;
+						
+						if( (0 == data.getUniverseID()) && (1 == data.getSubnetID()) ) {
+							String l_str = new String();
+							for( int loop=0; loop<20; loop++ )
+							{
+								l_str = l_str + String.format("%02X ", data.getDmxData()[loop]);
+							}
+							logger.info("ArtDmxPacket : {}", l_str );
+							
+							// send radio packet
+			        		EzspMfgLibSendPacketRequest mfgSendPacketlRqst = new EzspMfgLibSendPacketRequest();
+			        		
+							int[] messageContents = new int[7+20];
+							// MAC Header
+							// Frame control
+							messageContents[0] = 0x01;
+							messageContents[1] = 0x08;
+							// seq number
+							messageContents[2] = data.getSequenceID();
+							// dest panId
+							messageContents[3] = 0xCD;
+							messageContents[4] = 0xAB;
+							// dest addr
+							messageContents[5] = 0xFF;
+							messageContents[6] = 0xFF;
+							
+							// MAC Payload
+							for( int loop=0; loop<20; loop++ )
+							{
+								messageContents[7+loop] = data.getDmxData()[loop];
+							}
+							
+			        		mfgSendPacketlRqst.setMessageContents(messageContents);
+			        		EzspMfgLibSendPacketResponse mfgSendPacketRsp = (EzspMfgLibSendPacketResponse) dongle.singleCall(mfgSendPacketlRqst, EzspMfgLibSendPacketResponse.class);
+							
+							
+						}
 					}
 				}
 				
 				@Override
 				public void artNetPacketBroadcasted(ArtNetPacket packet) {
 					// TODO Auto-generated method stub
-					logger.info("artnet server packet broadcast : {}", packet);
+					// logger.info("artnet server packet broadcast : {}", packet);
 				}
 			});
 		} catch (SocketException e1) {
@@ -147,25 +264,8 @@ public class MainControleur {
 		} catch (ArtNetException e1) {
 			// TODO Auto-generated catch block
 			e1.printStackTrace();
-		}
-		*/
-
-        try {
-			Thread.sleep(30000);
-		} catch (InterruptedException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-        
-        
-    	logger.info("Close dongle");
-    	dongle.shutdown();
-    	
-    	logger.info("stopping artnet");
-    	//artnet.stop();
-        
-        
-        logger.error("Controleur STOP !");
+		}		
 	}
+	
 
 }
