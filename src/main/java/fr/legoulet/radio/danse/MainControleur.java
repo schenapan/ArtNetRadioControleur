@@ -221,10 +221,11 @@ public class MainControleur {
 							}
 							logger.info("ArtDmxPacket : {}", l_str );
 							
+							
 							// send radio packet
 			        		EzspMfgLibSendPacketRequest mfgSendPacketlRqst = new EzspMfgLibSendPacketRequest();
 			        		
-							int[] messageContents = new int[7+20];
+							int[] messageContents = new int[7+4+64];
 							// MAC Header
 							// Frame control
 							messageContents[0] = 0x01;
@@ -239,15 +240,28 @@ public class MainControleur {
 							messageContents[6] = 0xFF;
 							
 							// MAC Payload
-							for( int loop=0; loop<20; loop++ )
+							// Custom Header
+							// TAG
+							messageContents[7] = 'D';
+							messageContents[8] = 'M';
+							messageContents[9] = 'X';
+							// Option|Offset : 
+							// - Option :
+							// -- 0 : no compression
+							// - Offset : 4 lower bits, in raw of 64. ie :
+							// -- offset 0 means data 0->63
+							// -- offset 1 means data 64->127
+							// ...
+							messageContents[10] = 0;
+							
+							// payload
+							for( int loop=0; loop<64; loop++ )
 							{
-								messageContents[7+loop] = data.getDmxData()[loop];
+								messageContents[11+loop] = data.getDmxData()[loop];
 							}
 							
 			        		mfgSendPacketlRqst.setMessageContents(messageContents);
 			        		EzspMfgLibSendPacketResponse mfgSendPacketRsp = (EzspMfgLibSendPacketResponse) dongle.singleCall(mfgSendPacketlRqst, EzspMfgLibSendPacketResponse.class);
-							
-							
 						}
 					}
 				}
