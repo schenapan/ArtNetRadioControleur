@@ -1,5 +1,6 @@
 package fr.legoulet.radio.danse;
 
+import java.net.InetAddress;
 import java.net.SocketException;
 
 import org.slf4j.Logger;
@@ -163,9 +164,15 @@ public class MainControleur {
 						artnet4j.packets.ArtPollReplyPacket out = new artnet4j.packets.ArtPollReplyPacket();
 						out.setReportCode(NodeReportCode.RcPowerOk);
 						
+						InetAddress l_addr = Utils.getIPV4Address();
+						byte[] l_mac = Utils.getMACAddressInByte(null);
+						
+						logger.info("Utils.getIPAddress : {}, getMACAddress : {}", Utils.getIPV4Address().getHostAddress(), l_mac.toString());
+						
+						
 						byte[] pollReply = {0x41, 0x72, 0x74, 0x2d, 0x4e, 0x65, 0x74, 0x00, // ID: Art-Net
 									0x00, 0x21, // OpCode : ART_POLL_REPLY
-									(byte) 192, (byte) 168, 1, 84, // IpAddress
+									(byte) 0, (byte) 0, 0, 0, // IpAddress
 									0x36, 0x19, // PortNumber  
 									0, 1, // VersInfo
 									0, // NetSwitch 
@@ -197,13 +204,22 @@ public class MainControleur {
 									0x00, // Spare3
 									0x00, // Style
 									0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Mac
-									(byte) 192, (byte) 168, 1, 84, // BindIp
+									(byte) 0, (byte) 0, 0, 0, // BindIp
 									1, // BindIndex
 									0, // Status2
 									0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // Filler
 									0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
 									0, 0, 0, 0, 0, 0
 						};
+						
+						for(int loop=0;loop<4;loop++) {
+							pollReply[10+loop] = l_addr.getAddress()[loop];	
+							pollReply[207+loop] = l_addr.getAddress()[loop];	
+						}
+						
+						for(int loop=0;loop<6;loop++) {
+							pollReply[201+loop] = l_mac[loop];
+						}
 						
 						out.setData(pollReply);
 
